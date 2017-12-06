@@ -1,0 +1,195 @@
+---
+title: "Final Project"
+author: "Keith Kepner"
+date: "11/27/2017"
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+---
+<!-- Don't edit in between this line and the one below -->
+```{r include=FALSE}
+# Don't delete this chunk if you are using the DataComputing package
+library(DataComputing)
+```
+*Source file* 
+```{r, results='asis', echo=FALSE}
+includeSourceDocuments()
+```
+<!-- Don't edit the material above this line -->
+
+
+```{r,message=FALSE}
+library(lubridate)
+library(knitr)
+
+Baseball <- 
+  read.csv("Batting.csv")
+
+Baseball <-
+  Baseball %>%
+  select(playerID, yearID, teamID, lgID, G, AB, R, H, X2B, X3B, HR, RBI, BB, SO, HBP, SF) %>%
+  filter(yearID >= 1960)
+
+kable(head(Baseball))
+```
+
+I read in a data set of batting statistics for individual players and selected certain ones of interest such as runs, hits, doubles, home runs, RBIs, strikeouts, and walks.
+A case in this data set is a player in a respective year. For each player/year combination, their team for that year and the league that team is in are listed. 
+Player data from before 1960 was filtered out because all neccesary data for calculations was not consistently recorded beore this time.
+
+```{r}
+
+Salaries <-
+  read.csv("Salaries.csv")
+
+kable(head(Salaries))
+```
+
+
+I read in another data set from the Lahman data base that includes salary data for every MLB player in each season since 1985.
+
+```{r}
+Baseball <- 
+  Baseball %>%
+  mutate(avg = H / AB, avg = as.numeric(avg)) %>%
+  mutate(obp = (H + BB + HBP)/(AB + BB + HBP + SF))
+  
+Baseball500 <-
+  Baseball %>%
+  filter(AB > 500)
+```
+I used the raw data and the mutate function to calculate batting average and on-base percentage for each respective player.
+I then filtered out players that had less than 500 at bats in a season, because that is the minimum number of at bats needed to qualify for a season batting title (best average of the year).
+
+```{r AvgGraph, fig.height=5,fig.width=8}
+BestAvg <-
+  Baseball500 %>%
+  filter(avg > 0.90 * max(avg))
+
+BestAvg <- 
+  BestAvg %>%
+  group_by(playerID) %>%
+  summarise(total = sum(n())) %>%
+  arrange(desc(total))
+
+AvgGraph <- ggplot(data=BestAvg,aes(x=reorder(playerID,total),y=total ))+geom_bar(stat='identity',position='stack', width=.9) + theme(axis.text.x=element_text(angle=60,hjust=1)) 
+
+AvgGraph
+
+BestOBP <-
+  Baseball500 %>%
+  filter(obp > 0.90 * max(obp))
+
+BestOBP <- 
+  BestOBP %>%
+  group_by(playerID) %>%
+  summarise(total = sum(n())) %>%
+  arrange(desc(total))
+
+ggplot(data=BestOBP,aes(x=reorder(playerID,total),y=total ))+geom_bar(stat='identity',position='stack', width=.9) + theme(axis.text.x=element_text(angle=60,hjust=1))
+
+```
+
+So these two new data sets provide counts for which players over the past 57 years have had seasons above the 90th percentile in batting average and on base percentage respectively. Looking at each plot, Wade Boggs, Rod Carew, Tony Gwynn, and Ichiro had the most seasons (4-5) above the 90th percentile for batting average. Wade Boggs, Frank Thomas, Barry Bonds, and Todd Helton all have had at least 4 seasons in their careers with on base percentages above the 90th percentile.
+
+```{r, warning=FALSE}
+
+Stats_salary <-
+ inner_join(Salaries, Baseball, by = c("playerID", "lgID", "yearID","teamID"))
+
+
+kable(head(Stats_salary))
+
+
+```
+
+I performed an inner join with the Salaries data set and Baseball data set to get rid of cases from the baseball set that don't apply because the salaries data set only has data from after 1985. Using an inner join drops years 1960-1984 from the Baseball stats data set that I don't have salary information for.
+
+```{r SalGraph, fig.height=5, fig.width=8}
+Teams <-
+  Stats_salary %>%
+  group_by(teamID,yearID) %>% #make each team and year a case by combining player data
+  summarise(payroll = sum(salary)) %>% #find the total payroll for each team in a given season
+  group_by(teamID) %>%  #group each team across years so I can find the average payrolls per season since 1985
+  summarise(avgSal = mean(payroll))
+
+#create a function to combine teams that have changed their cities over the years (ex: Montreal to Wash)
+MergeTeams <- function(KeptTeam,RemovedTeam) {
+
+Teams[which(grepl(KeptTeam,Teams)),2]<-
+Teams[which(grepl(KeptTeam,Teams)),2]+
+Teams[which(grepl(RemovedTeam,Teams)),2]
+
+Teams <- Teams[ which(Teams !=RemovedTeam),]
+return(Teams)
+}
+
+Teams = MergeTeams("MIA","FLO")
+
+Teams = MergeTeams("LAA", "CAL")
+
+Teams = MergeTeams("WAS", "MON")
+
+Teams = MergeTeams("MIL","ML4")
+
+Teams = MergeTeams("LAA", "ANA")  #remove and combine each of the 5 teams that are redundant
+
+
+Teams <- na.omit(Teams) #function left "missing data" for removed teams, remove that
+
+League <- c("NL","NL","AL","AL","AL","NL","NL","AL","NL","AL","AL","AL","AL","NL","NL","NL","AL","AL","NL","AL","NL","NL","NL","AL","NL","NL","AL","AL","AL","NL") 
+#provide a vector of league ID's for each of the 30 teams that I can add to the Teams dataset
+
+Teams <- cbind(Teams,League) #include league ID for a ggplot to classify teams as AL or NL by color
+  
+SalGraph <- ggplot(data=Teams,aes(x=reorder(teamID,avgSal),y=avgSal ,fill=League))+geom_bar(stat='identity',position='stack', width=.9) + theme(axis.text.x=element_text(angle=60,hjust=1)) 
+
+SalGraph
+```
+
+This chunk creates a new data set called Teams that has the average season payroll for each of the 30 MLB since 1985 (or more recently if the team wasn't around in 1985). I then graphed the average payroll and ordered the x-axis teams by average payroll to quickly see where each team's average payroll is in comparasion to the other MLB teams. Teams were also classified by league ID to see whether or not the league the team is in effects thier average payroll. Based on this graphic, it appears that NL teams may tend to be more similar to each other while AL team payrolls tend to be more on the extreme - either really high (NYA,BOS,LAA) or really low (TBA,KCA,MIN,etc.)
+
+```{r, warning = FALSE}
+library(rjson)
+
+GPScord <- file("mlb_stadium.json") #read in a json file with GPS coordindates of all MLB stadiums
+GPScord <- fromJSON(file=GPScord)
+GPScord <- data.frame(matrix(unlist(GPScord),nrow=30,byrow=T)) #go from json list to a data frame
+
+Abrev <- c("LAA","ARI","ATL","BAL","BOS","CHN","CHA","CIN","CLE","COL","DET","MIA","HOU","KCA","LAN","MIL","MIN","WAS","NYN","NYA","OAK","PHI","PIT","SLN","SDN","SFN","SEA","TBA","TEX","TOR")
+
+Stadiums <- cbind(GPScord,Abrev)  #add the team's abbreviations to the Stadiums table to prepare a join
+
+MapData <- Teams %>%
+  left_join(Stadiums, by =c("teamID"="Abrev")) 
+
+#match team and city name column with their respective abbreviations
+
+colnames(MapData) <- c("Abrev","avgSal","League","Team","Address","lat","lng")
+
+MapData <- 
+  MapData %>%
+  mutate(lat=as.character(lat),lng=as.character(lng),avgSal = as.character(avgSal)) %>%
+  mutate(lat=as.numeric(lat),lng=as.numeric(lng),avgSal = as.numeric(avgSal)) #convert lat and lingitude from factor variables to character variables to numeric variables to avoid conversion errors and allow for usage in a leaflet
+
+
+```
+
+```{r MlbMap, fig.height = 6, fig.width = 8, warning=FALSE}
+library(leaflet)
+
+pal <- colorFactor(c("red", "navy"), domain = c("AL", "NL")) #assign colors for my leaflet by league
+
+MapData <-
+  MapData %>%
+  format(round(MapData$avgSal,0),nsmall = 0) %>%
+  mutate(lat=as.numeric(lat),lng=as.numeric(lng),avgSal = as.numeric(avgSal))
+
+MlbMap <-
+  leaflet(MapData) %>%
+  addTiles() %>%   
+  addCircleMarkers(radius=~MapData$avgSal/6000000,label=c(MapData$Abrev,MapData$avgSal), color=pal(MapData$League))
+
+MlbMap
+```
